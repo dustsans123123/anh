@@ -1,3 +1,10 @@
+#!/data/data/com.termux/files/usr/bin/python
+"""
+Chạy: su -c "/data/data/com.termux/files/usr/bin/python /sdcard/Download/main.py"
+Chỉ cần 1 file này - ảnh đã nhúng sẵn trong code, không cần copy ảnh riêng.
+Chọn ảnh theo số -> set wallpaper -> chỉnh DPI -> báo kết quả.
+"""
+
 import subprocess
 import sys
 import base64
@@ -11,7 +18,19 @@ IMAGES_B64 = {
 }
 
 
-TARGET_DPI = 700
+# DPI mục tiêu. Lưu ý: DPI THẤP -> chữ/icon TO ra. DPI CAO -> chữ/icon NHỎ lại.
+# DPI gốc máy này là 320 (xem bằng lệnh "wm density" không kèm số).
+# 170 là mức rất thấp -> icon/chữ to đáng kể. Một số app có thể vỡ layout
+# ở mức này; nếu xảy ra, tăng dần lên 200-240.
+TARGET_DPI = 170
+
+# 4 developer-option settings cần bật, map đúng theo tên hiển thị trong Settings UI.
+DEV_OPTIONS = [
+    ("force_allow_on_external", "Buộc cho phép các ứng dụng trên bộ nhớ ngoài"),
+    ("force_resizable_activities", "Buộc các hoạt động có thể thay đổi kích thước"),
+    ("enable_freeform_support", "Bật cửa sổ dạng tự do"),
+    ("force_desktop_mode_on_external_displays", "Buộc chạy chế độ máy tính"),
+]
 
 TMP_DIR = "/data/local/tmp/wallpapers_tmp"
 
@@ -27,6 +46,8 @@ def decode_image(key: str) -> str:
     raw = base64.b64decode(b64data)
     out_path = f"{TMP_DIR}/{key}.png"
 
+    # Ghi ra file tạm trong Termux (không cần root để ghi /data/local/tmp qua app context),
+    # sau đó dùng su để đảm bảo quyền đọc cho hệ thống.
     os.makedirs(TMP_DIR, exist_ok=True)
     with open(out_path, "wb") as f:
         f.write(raw)
@@ -67,6 +88,25 @@ def set_dpi(dpi: int) -> bool:
     return False
 
 
+def enable_dev_options() -> bool:
+    """Bật 4 cờ Developer Options: external storage force, resizable activities,
+    freeform windows, force desktop mode. Trả về True nếu tất cả thành công."""
+    all_ok = True
+    for key, label in DEV_OPTIONS:
+        code, out, err = run_su(f"settings put global {key} 1")
+        if code != 0:
+            print(f"Lỗi bật '{label}' ({key}): {err or out}", file=sys.stderr)
+            all_ok = False
+            continue
+
+        # Xác nhận lại giá trị đã set
+        code2, out2, err2 = run_su(f"settings get global {key}")
+        if out2.strip() != "1":
+            print(f"Cảnh báo: '{label}' ({key}) get trả về '{out2}', không phải '1'", file=sys.stderr)
+            all_ok = False
+    return all_ok
+
+
 def show_menu() -> None:
     print("Chọn ảnh nền:")
     for i, key in enumerate(IMAGES_B64.keys(), start=1):
@@ -103,10 +143,18 @@ def main():
     dpi_ok = set_dpi(TARGET_DPI)
     print("Chỉnh DPI: " + ("THÀNH CÔNG" if dpi_ok else "THẤT BẠI"))
 
-    if wp_ok and dpi_ok:
-        print("\n Hoàn tất, mọi thứ đã áp dụng.")
+    print("\nĐang bật 4 tùy chọn nhà phát triển ...")
+    dev_ok = enable_dev_options()
+    for key, label in DEV_OPTIONS:
+        code, out, err = run_su(f"settings get global {key}")
+        status = "BẬT" if out.strip() == "1" else "CHƯA BẬT"
+        print(f"  - {label}: {status}")
+    print("Bật developer options: " + ("THÀNH CÔNG" if dev_ok else "MỘT SỐ THẤT BẠI"))
+
+    if wp_ok and dpi_ok and dev_ok:
+        print("\n✅ Hoàn tất, mọi thứ đã áp dụng.")
     else:
-        print("\n Có bước thất bại, xem lỗi phía trên.")
+        print("\n⚠️ Có bước thất bại, xem lỗi phía trên.")
 
 
 if __name__ == "__main__":
